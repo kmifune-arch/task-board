@@ -77,16 +77,14 @@ export default function Home() {
   const [input, setInput] = useState("");
 
   const addTask = useCallback(() => {
-    setInput((current) => {
-      const text = current.trim();
-      if (!text) return current;
-      writeTasks([
-        ...readTasks(),
-        { id: crypto.randomUUID(), text, done: false },
-      ]);
-      return "";
-    });
-  }, []);
+    const text = input.trim();
+    if (!text) return;
+    writeTasks([
+      ...readTasks(),
+      { id: crypto.randomUUID(), text, done: false },
+    ]);
+    setInput("");
+  }, [input]);
 
   const toggleTask = useCallback((id: string) => {
     writeTasks(
