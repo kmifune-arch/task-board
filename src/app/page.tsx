@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 
 type Task = {
   id: string;
@@ -74,17 +74,6 @@ const getServerSnapshot = () => EMPTY_TASKS;
 
 export default function Home() {
   const tasks = useSyncExternalStore(subscribe, readTasks, getServerSnapshot);
-  const [input, setInput] = useState("");
-
-  const addTask = useCallback(() => {
-    const text = input.trim();
-    if (!text) return;
-    writeTasks([
-      ...readTasks(),
-      { id: crypto.randomUUID(), text, done: false },
-    ]);
-    setInput("");
-  }, [input]);
 
   const toggleTask = useCallback((id: string) => {
     writeTasks(
@@ -96,8 +85,6 @@ export default function Home() {
     writeTasks(readTasks().filter((t) => t.id !== id));
   }, []);
 
-  const canSubmit = useMemo(() => input.trim().length > 0, [input]);
-
   return (
     <main className="mx-auto w-full max-w-2xl px-6 py-12">
       <h1 className="mb-8 text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
@@ -108,20 +95,27 @@ export default function Home() {
         className="mb-6 flex gap-2"
         onSubmit={(e) => {
           e.preventDefault();
-          addTask();
+          const form = e.currentTarget;
+          const data = new FormData(form);
+          const text = (data.get("task")?.toString() ?? "").trim();
+          if (!text) return;
+          writeTasks([
+            ...readTasks(),
+            { id: crypto.randomUUID(), text, done: false },
+          ]);
+          form.reset();
         }}
       >
         <input
+          name="task"
           type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
           placeholder="新しいタスクを入力"
+          autoComplete="off"
           className="flex-1 rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
         />
         <button
           type="submit"
-          className="rounded-md bg-zinc-900 px-4 py-2 font-medium text-white transition-colors hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-300"
-          disabled={!canSubmit}
+          className="rounded-md bg-zinc-900 px-4 py-2 font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-300"
         >
           追加
         </button>
