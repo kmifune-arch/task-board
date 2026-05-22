@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Task = {
   id: string;
@@ -9,81 +9,80 @@ type Task = {
 };
 
 const STORAGE_KEY = "task-board:tasks";
-const STORAGE_EVENT = "task-board:tasks-changed";
-const EMPTY_TASKS: Task[] = [];
 
-function isTaskArray(value: unknown): value is Task[] {
-  return (
-    Array.isArray(value) &&
-    value.every(
-      (v) =>
+function makeId(): string {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
+    try {
+      return crypto.randomUUID();
+    } catch {
+      // フォールバックへ
+    }
+  }
+  return `t-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function loadTasks(): Task[] {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (v): v is Task =>
         v !== null &&
         typeof v === "object" &&
         typeof (v as Task).id === "string" &&
         typeof (v as Task).text === "string" &&
         typeof (v as Task).done === "boolean",
-    )
-  );
-}
-
-let cachedRaw: string | null = null;
-let cachedTasks: Task[] = EMPTY_TASKS;
-
-function readTasks(): Task[] {
-  if (typeof window === "undefined") return EMPTY_TASKS;
-  let raw: string | null = null;
-  try {
-    raw = localStorage.getItem(STORAGE_KEY);
+    );
   } catch {
-    return EMPTY_TASKS;
-  }
-  if (raw === cachedRaw) return cachedTasks;
-  cachedRaw = raw;
-  if (raw === null) {
-    cachedTasks = EMPTY_TASKS;
-    return cachedTasks;
-  }
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    cachedTasks = isTaskArray(parsed) ? parsed : EMPTY_TASKS;
-  } catch {
-    cachedTasks = EMPTY_TASKS;
-  }
-  return cachedTasks;
-}
-
-function writeTasks(tasks: Task[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
-    window.dispatchEvent(new Event(STORAGE_EVENT));
-  } catch {
-    // 容量超過などは黙って継続
+    return [];
   }
 }
-
-function subscribe(callback: () => void) {
-  window.addEventListener(STORAGE_EVENT, callback);
-  window.addEventListener("storage", callback);
-  return () => {
-    window.removeEventListener(STORAGE_EVENT, callback);
-    window.removeEventListener("storage", callback);
-  };
-}
-
-const getServerSnapshot = () => EMPTY_TASKS;
 
 export default function Home() {
-  const tasks = useSyncExternalStore(subscribe, readTasks, getServerSnapshot);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [hydrated, setHydrated] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const toggleTask = useCallback((id: string) => {
-    writeTasks(
-      readTasks().map((t) => (t.id === id ? { ...t, done: !t.done } : t)),
+  useEffect(() => {
+    const loaded = loadTasks();
+    // localStorage からの初期化のため setState を許容
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (loaded.length > 0) setTasks(loaded);
+    setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+    } catch {
+      // 容量超過などは無視
+    }
+  }, [tasks, hydrated]);
+
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const el = inputRef.current;
+    const text = (el?.value ?? "").trim();
+    if (!text) return;
+    setTasks((prev) => [...prev, { id: makeId(), text, done: false }]);
+    if (el) el.value = "";
+  };
+
+  const toggleTask = (id: string) => {
+    setTasks((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, done: !t.done } : t)),
     );
-  }, []);
+  };
 
-  const deleteTask = useCallback((id: string) => {
-    writeTasks(readTasks().filter((t) => t.id !== id));
-  }, []);
+  const deleteTask = (id: string) => {
+    setTasks((prev) => prev.filter((t) => t.id !== id));
+  };
 
   return (
     <main className="mx-auto w-full max-w-2xl px-6 py-12">
@@ -91,23 +90,9 @@ export default function Home() {
         タスクボード
       </h1>
 
-      <form
-        className="mb-6 flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const form = e.currentTarget;
-          const data = new FormData(form);
-          const text = (data.get("task")?.toString() ?? "").trim();
-          if (!text) return;
-          writeTasks([
-            ...readTasks(),
-            { id: crypto.randomUUID(), text, done: false },
-          ]);
-          form.reset();
-        }}
-      >
+      <form className="mb-6 flex gap-2" onSubmit={handleSubmit}>
         <input
-          name="task"
+          ref={inputRef}
           type="text"
           placeholder="新しいタスクを入力"
           autoComplete="off"
