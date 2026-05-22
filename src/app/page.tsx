@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 
 type Task = {
   id: string;
@@ -8,29 +8,97 @@ type Task = {
   done: boolean;
 };
 
+const STORAGE_KEY = "task-board:tasks";
+const STORAGE_EVENT = "task-board:tasks-changed";
+const EMPTY_TASKS: Task[] = [];
+
+function isTaskArray(value: unknown): value is Task[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (v) =>
+        v !== null &&
+        typeof v === "object" &&
+        typeof (v as Task).id === "string" &&
+        typeof (v as Task).text === "string" &&
+        typeof (v as Task).done === "boolean",
+    )
+  );
+}
+
+let cachedRaw: string | null = null;
+let cachedTasks: Task[] = EMPTY_TASKS;
+
+function readTasks(): Task[] {
+  if (typeof window === "undefined") return EMPTY_TASKS;
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return EMPTY_TASKS;
+  }
+  if (raw === cachedRaw) return cachedTasks;
+  cachedRaw = raw;
+  if (raw === null) {
+    cachedTasks = EMPTY_TASKS;
+    return cachedTasks;
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    cachedTasks = isTaskArray(parsed) ? parsed : EMPTY_TASKS;
+  } catch {
+    cachedTasks = EMPTY_TASKS;
+  }
+  return cachedTasks;
+}
+
+function writeTasks(tasks: Task[]) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+    window.dispatchEvent(new Event(STORAGE_EVENT));
+  } catch {
+    // 容量超過などは黙って継続
+  }
+}
+
+function subscribe(callback: () => void) {
+  window.addEventListener(STORAGE_EVENT, callback);
+  window.addEventListener("storage", callback);
+  return () => {
+    window.removeEventListener(STORAGE_EVENT, callback);
+    window.removeEventListener("storage", callback);
+  };
+}
+
+const getServerSnapshot = () => EMPTY_TASKS;
+
 export default function Home() {
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const tasks = useSyncExternalStore(subscribe, readTasks, getServerSnapshot);
   const [input, setInput] = useState("");
 
-  const addTask = () => {
-    const text = input.trim();
-    if (!text) return;
-    setTasks((prev) => [
-      ...prev,
-      { id: crypto.randomUUID(), text, done: false },
-    ]);
-    setInput("");
-  };
+  const addTask = useCallback(() => {
+    setInput((current) => {
+      const text = current.trim();
+      if (!text) return current;
+      writeTasks([
+        ...readTasks(),
+        { id: crypto.randomUUID(), text, done: false },
+      ]);
+      return "";
+    });
+  }, []);
 
-  const toggleTask = (id: string) => {
-    setTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, done: !t.done } : t)),
+  const toggleTask = useCallback((id: string) => {
+    writeTasks(
+      readTasks().map((t) => (t.id === id ? { ...t, done: !t.done } : t)),
     );
-  };
+  }, []);
 
-  const deleteTask = (id: string) => {
-    setTasks((prev) => prev.filter((t) => t.id !== id));
-  };
+  const deleteTask = useCallback((id: string) => {
+    writeTasks(readTasks().filter((t) => t.id !== id));
+  }, []);
+
+  const canSubmit = useMemo(() => input.trim().length > 0, [input]);
 
   return (
     <main className="mx-auto w-full max-w-2xl px-6 py-12">
@@ -55,7 +123,7 @@ export default function Home() {
         <button
           type="submit"
           className="rounded-md bg-zinc-900 px-4 py-2 font-medium text-white transition-colors hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-300"
-          disabled={!input.trim()}
+          disabled={!canSubmit}
         >
           追加
         </button>
